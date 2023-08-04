@@ -1,5 +1,5 @@
+import logging
 import discord
-from discord import Intents, client
 
 
 class Bot(discord.Client):
@@ -9,15 +9,16 @@ class Bot(discord.Client):
         intents.message_content = True
 
         # init base client class
-        super().__init__(intents=Intents.All)
+        super().__init__(intents=intents)
+
+        # run client
         super().run(token=token)
 
     async def on_ready(self):
-        print(f'Logged on as {self.user}!')
+        logging.info(f"Ready from f{self.user}!")
 
     async def on_message(self, message):
         if message.author == self.user:
             return
-
-        if message.content.startswith('$hello'):
-            await message.channel.send('Hello!')
+        if message.content.startswith("$hello"):
+            await message.channel.send("Hello!")
