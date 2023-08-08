@@ -10,6 +10,9 @@ class Bot(discord.ext.commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
 
+        # load bot config TODO
+        self.archive_channels = ["archive", "test"]
+
         # init base client class
         super().__init__(command_prefix="!", intents=intents)
 
@@ -20,16 +23,22 @@ class Bot(discord.ext.commands.Bot):
         logging.info(f"Ready from {self.user}!")
 
     async def on_message(self, message):
+        # check for bot messages
         if message.author == self.user:
+            return
+
+        # check if message is from configured channel(s)
+        if len(self.archive_channels) and str(message.channel) not in self.archive_channels:
             return
 
         # is this message an url?
         if self.is_url(message.content):
             logging.info("is url")
-        
+        else:
+            logging.info("not url")
+
         if message.content.startswith("$hello"):
             await message.channel.send("Hello!")
-        logging.info(message.channel)
 
     @classmethod
     def is_url(cls, text: str) -> bool:
