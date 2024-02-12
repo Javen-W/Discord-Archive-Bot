@@ -1,3 +1,4 @@
+import json
 import logging
 import discord
 from discord.ext.commands import bot, command
@@ -20,8 +21,9 @@ class Bot(discord.ext.commands.Bot):
         self.archive_channels = ["archive", "test"]
         self.output_path = './archive'
         self.ytdl_config = {
+            'logger': logging.getLogger(),
             'paths': {'home': self.output_path},
-            'download_archive': os.path.join(self.output_path, 'archive_ledger.txt'),
+            'download_archive': os.path.join(self.output_path, '.archive'),
             'progress_hooks': [self.video_progress_hook],
         }
 
@@ -53,7 +55,8 @@ class Bot(discord.ext.commands.Bot):
             # is this a video url?
             if self.is_video_url(parsed_url):
                 logging.info("is video url")
-                self.download_video(message.content)
+                msg = self.download_video(message.content)
+                await message.channel.send(msg)
 
         else:
             logging.info("not url")
@@ -72,10 +75,16 @@ class Bot(discord.ext.commands.Bot):
     def download_video(self, url: str):
         # TODO is youtube video?
         with yt_dlp.YoutubeDL(self.ytdl_config) as ydl:
-            err = ydl.download([url])
+            # extract video info
+            info = ydl.extract_info(url, download=False)
+
+            # download video
+            err = ydl.download(url)
             if err:
-                logging.error("Failed to download youtube video!", err)
+                return f"Failed to archive video! {err}"
+            else:
+                return "Successfully archived video!"
 
     @classmethod
     def video_progress_hook(cls, d):
-        logging.info(d['_percent_str'])
+        logging.info(f"{d['_percent_str']} # {d['filename']}")
