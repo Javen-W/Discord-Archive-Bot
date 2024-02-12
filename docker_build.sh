@@ -1,7 +1,7 @@
 #!/bin/bash
-imageName=discord-archive-bot
-# containerName=discord-archive-bot
-docker image prune --force # -a
-docker build . -t $imageName # --force-rm --no-cache
-docker run --rm -e DISCORD_TOKEN="$DISCORD_TOKEN" $imageName # -t --name $containerName
+image_name=discord-archive-bot
+archive_path=./archive  # host archive path
 
+docker image prune --force # -a
+docker build . -t $image_name # --force-rm --no-cache
+docker run -it --rm --env-file=.env -v $archive_path:/archive $image_name

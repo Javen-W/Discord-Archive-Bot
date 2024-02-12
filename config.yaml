@@ -1,4 +1,4 @@
-archive_path: './archive'
+archive_path: '/archive'  # container (absolute) archive path
 archive_channels:
   - "test"
   - "archive"
