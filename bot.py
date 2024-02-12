@@ -6,6 +6,7 @@ import validators
 from urllib.parse import urlparse, ParseResult
 import yt_dlp
 import os
+import yaml
 
 
 class Bot(discord.ext.commands.Bot):
@@ -17,18 +18,20 @@ class Bot(discord.ext.commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
 
-        # load bot config TODO
-        self.archive_channels = ["archive", "test"]
-        self.output_path = './archive'
+        # load bot config
+        with open('config.yaml', 'r') as f:
+            self.cfg = yaml.safe_load(f)
+
+        # init youtube downloader config
         self.ytdl_config = {
             'logger': logging.getLogger(),
-            'paths': {'home': self.output_path},
-            'download_archive': os.path.join(self.output_path, '.archive'),
+            'paths': {'home': self.cfg.get('archive_path')},
+            'download_archive': os.path.join(self.cfg.get('archive_path'), '.archive'),
             'progress_hooks': [self.video_progress_hook],
         }
 
         # init base client class
-        super().__init__(command_prefix="!", intents=intents)
+        super().__init__(command_prefix=self.cfg.get('command_prefix'), intents=intents)
 
         # run client
         super().run(token=token)
@@ -43,7 +46,7 @@ class Bot(discord.ext.commands.Bot):
             return
 
         # check if message is from configured channel(s)
-        if len(self.archive_channels) and str(message.channel) not in self.archive_channels:
+        if len(self.cfg.get('archive_channels')) and str(message.channel) not in self.cfg.get('archive_channels'):
             return
 
         # is this message an url?

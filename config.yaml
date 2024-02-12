@@ -1,0 +1,5 @@
+archive_path: './archive'
+archive_channels:
+  - "test"
+  - "archive"
+command_prefix: "!archive"
