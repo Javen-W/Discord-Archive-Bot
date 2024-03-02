@@ -56,18 +56,17 @@ class Bot(discord.ext.commands.Bot):
 
         # is this message an url?
         if self.is_url(message.content):
-            logging.info("is url")
             parsed_url = urlparse(message.content)
             logging.info(parsed_url)
 
             # is this a video url?
             if self.is_video_url(parsed_url):
-                logging.info("is video url")
-                msg = self.download_video(message.content)
-                await message.channel.send(msg)
-
-        else:
-            logging.info("not url")
+                # await message.clear_reactions()
+                success = self.download_video(message.content)
+                if success:
+                    await message.add_reaction("✅")
+                else:
+                    await message.add_reaction("❌")
 
         if message.content.startswith("$hello"):
             await message.channel.send("Hello!")
@@ -80,18 +79,23 @@ class Bot(discord.ext.commands.Bot):
     def is_video_url(cls, result: ParseResult) -> bool:
         return result.netloc in cls.video_netlocs
 
-    def download_video(self, url: str):
+    def download_video(self, url: str) -> bool:
+        """
+        Attempts to download video from given url.
+        Returns true if successful.
+        """
         # TODO is youtube video?
-        with yt_dlp.YoutubeDL(self.ytdl_config) as ydl:
-            # extract video info
-            info = ydl.extract_info(url, download=False)
+        try:
+            with yt_dlp.YoutubeDL(self.ytdl_config) as ydl:
+                # extract video info
+                info = ydl.extract_info(url, download=False)
 
-            # download video
-            err = ydl.download(url)
-            if err:
-                return f"Failed to archive video! {err}"
-            else:
-                return "Successfully archived video!"
+                # download video
+                err = ydl.download(url)
+                return not err
+        except Exception as e:
+            logging.error(e)
+            return False
 
     @classmethod
     def video_progress_hook(cls, d):
