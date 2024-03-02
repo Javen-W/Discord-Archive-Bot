@@ -10,7 +10,6 @@ import yaml
 
 
 class Bot(discord.ext.commands.Bot):
-
     video_netlocs = ["youtu.be"]
 
     def __init__(self, token: str):
@@ -38,9 +37,15 @@ class Bot(discord.ext.commands.Bot):
 
     async def on_ready(self):
         logging.info(f"Ready from {self.user}!")
-        # self.download_video('https://www.youtube.com/watch?v=osGTtARJlJs')
+        for channel_name in self.cfg.get('archive_channels'):
+            channel = discord.utils.get(self.get_all_channels(), name=channel_name)  # guild__name='Cool', name='general'
+            async for msg in channel.history(limit=100, oldest_first=False,):
+                await self.process_message(msg)
 
     async def on_message(self, message):
+        await self.process_message(message)
+
+    async def process_message(self, message):
         # check for bot messages
         if message.author == self.user:
             return
