@@ -1,5 +1,4 @@
-archive_path: '/archive'  # container (absolute) archive path
+archive_path: '.\archive'  # container (absolute) archive path
 archive_channels:
-  - "test"
   - "archive"
 command_prefix: "!archive"
