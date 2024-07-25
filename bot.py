@@ -8,10 +8,12 @@ import yt_dlp
 import os
 import yaml
 
+# bot consts
+HISTORY_LIMIT = 100
+YT_NETLOCS = ["youtu.be", "www.youtube.com"]
+
 
 class Bot(discord.ext.commands.Bot):
-    # net locations
-    yt_netlocs = ["youtu.be"]
 
     def __init__(self, token: str):
         # define intents
@@ -40,7 +42,7 @@ class Bot(discord.ext.commands.Bot):
         logging.info(f"Ready from {self.user}!")
         for channel_name in self.cfg.get('archive_channels'):
             channel = discord.utils.get(self.get_all_channels(), name=channel_name)  # guild__name='Cool', name='general'
-            async for msg in channel.history(limit=100, oldest_first=False,):
+            async for msg in channel.history(limit=HISTORY_LIMIT, oldest_first=False,):
                 await self.process_message(msg)
 
     async def on_message(self, message):
@@ -79,7 +81,7 @@ class Bot(discord.ext.commands.Bot):
 
     @classmethod
     def is_youtube_url(cls, result: ParseResult) -> bool:
-        return result.netloc in cls.yt_netlocs
+        return result.netloc in YT_NETLOCS
 
     def download_youtube_video(self, url: str) -> bool:
         """
@@ -90,7 +92,7 @@ class Bot(discord.ext.commands.Bot):
             with yt_dlp.YoutubeDL(self.ytdl_config) as ydl:
                 # extract video info
                 info = ydl.extract_info(url, download=False)
-                logging.info(info)
+                # logging.info(info)  # TODO: archive info
                 # download video
                 err = ydl.download(url)
                 return not err
