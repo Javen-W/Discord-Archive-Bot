@@ -24,9 +24,12 @@ class Bot(discord.ext.commands.Bot):
         with open('config.yaml', 'r') as f:
             self.cfg = yaml.safe_load(f)
 
+        # init logger
+        self.logger = self._init_logger()
+
         # init youtube downloader config
         self.ytdl_config = {
-            'logger': logging.getLogger(),
+            'logger': self.logger,
             'paths': {'home': self.cfg.get('archive_path')},
             'download_archive': os.path.join(self.cfg.get('archive_path'), '.archive'),
             'progress_hooks': [self.video_progress_hook],
@@ -39,7 +42,7 @@ class Bot(discord.ext.commands.Bot):
         super().run(token=token)
 
     async def on_ready(self):
-        logging.info(f"Ready from {self.user}!")
+        self.logger.info(f"Ready from {self.user}!")
         for channel_name in self.cfg.get('archive_channels'):
             channel = discord.utils.get(self.get_all_channels(), name=channel_name)  # guild__name='Cool', name='general'
             async for msg in channel.history(limit=HISTORY_LIMIT, oldest_first=False,):
@@ -60,7 +63,7 @@ class Bot(discord.ext.commands.Bot):
         # is this message an url?
         if self.is_url(message.content):
             parsed_url = urlparse(message.content)
-            logging.info(parsed_url)
+            self.logger.info(parsed_url)
 
             # is this a youtube video url?
             if self.is_youtube_url(parsed_url):
@@ -92,14 +95,34 @@ class Bot(discord.ext.commands.Bot):
             with yt_dlp.YoutubeDL(self.ytdl_config) as ydl:
                 # extract video info
                 info = ydl.extract_info(url, download=False)
-                # logging.info(info)  # TODO: archive info
+                # self.logger.info(info)  # TODO: archive info
                 # download video
                 err = ydl.download(url)
                 return not err
         except Exception as e:
-            logging.error(e)
+            self.logger.error(e)
             return False
 
+    def video_progress_hook(self, d):
+        self.logger.info(f"{d['_percent_str']} # {d['filename']}")
+
     @classmethod
-    def video_progress_hook(cls, d):
-        logging.info(f"{d['_percent_str']} # {d['filename']}")
+    def _init_logger(cls):
+        """
+        Initializes the bot logger.
+        Logs to both log file and standard output.
+        """
+        logger = logging.getLogger("bot")
+        logger.setLevel(logging.DEBUG)
+        log_format = logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S')
+
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(log_format)
+        stream_handler.setLevel(logging.INFO)
+        logger.addHandler(stream_handler)
+
+        info_handler = logging.FileHandler('./bot.log')
+        info_handler.setFormatter(log_format)
+        info_handler.setLevel(logging.DEBUG)
+        logger.addHandler(info_handler)
+        return logger
