@@ -10,7 +10,8 @@ import yaml
 
 
 class Bot(discord.ext.commands.Bot):
-    video_netlocs = ["youtu.be"]
+    # net locations
+    yt_netlocs = ["youtu.be"]
 
     def __init__(self, token: str):
         # define intents
@@ -59,10 +60,11 @@ class Bot(discord.ext.commands.Bot):
             parsed_url = urlparse(message.content)
             logging.info(parsed_url)
 
-            # is this a video url?
-            if self.is_video_url(parsed_url):
+            # is this a youtube video url?
+            if self.is_youtube_url(parsed_url):
                 # await message.clear_reactions()
-                success = self.download_video(message.content)
+                yt_url = message.content
+                success = self.download_youtube_video(yt_url)
                 if success:
                     await message.add_reaction("✅")
                 else:
@@ -76,20 +78,19 @@ class Bot(discord.ext.commands.Bot):
         return validators.url(text)
 
     @classmethod
-    def is_video_url(cls, result: ParseResult) -> bool:
-        return result.netloc in cls.video_netlocs
+    def is_youtube_url(cls, result: ParseResult) -> bool:
+        return result.netloc in cls.yt_netlocs
 
-    def download_video(self, url: str) -> bool:
+    def download_youtube_video(self, url: str) -> bool:
         """
         Attempts to download video from given url.
         Returns true if successful.
         """
-        # TODO is youtube video?
         try:
             with yt_dlp.YoutubeDL(self.ytdl_config) as ydl:
                 # extract video info
                 info = ydl.extract_info(url, download=False)
-
+                logging.info(info)
                 # download video
                 err = ydl.download(url)
                 return not err
