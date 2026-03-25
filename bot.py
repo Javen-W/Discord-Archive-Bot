@@ -1,15 +1,28 @@
 import asyncio
 import logging
+import logging.handlers
 import discord
 import validators
 from urllib.parse import urlparse, ParseResult
 import yt_dlp
+import yt_dlp.utils
 import os
 import yaml
 
 # bot consts
 HISTORY_LIMIT = 100
-YT_NETLOCS = ["youtu.be", "www.youtube.com"]
+
+# All recognised YouTube netlocs (desktop, mobile, music, short-link)
+YT_NETLOCS = {
+    "www.youtube.com",
+    "youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be",
+}
+
+# Logs directory (relative to working directory)
+LOGS_DIR = "./logs"
 
 
 class Bot(discord.ext.commands.Bot):
@@ -40,6 +53,9 @@ class Bot(discord.ext.commands.Bot):
             'fragment_retries': 10,
             # Use a larger HTTP chunk size to reduce throttling
             'http_chunk_size': 10485760,  # 10 MB
+            # Download entire playlists; skip unavailable items without aborting
+            'noplaylist': False,
+            'ignoreerrors': True,
         }
 
         # init base client class
@@ -92,6 +108,10 @@ class Bot(discord.ext.commands.Bot):
 
     @classmethod
     def is_youtube_url(cls, result: ParseResult) -> bool:
+        """
+        Returns True for any YouTube URL variant:
+        regular videos, Shorts, playlists, livestreams, YouTube Music, and mobile links.
+        """
         return result.netloc in YT_NETLOCS
 
     async def download_youtube_video(self, url: str) -> bool:
@@ -109,8 +129,11 @@ class Bot(discord.ext.commands.Bot):
             with yt_dlp.YoutubeDL(self.ytdl_config) as ydl:
                 err = ydl.download([url])
                 return not err
+        except (yt_dlp.utils.DownloadError, yt_dlp.utils.ExtractorError) as e:
+            self.logger.error(f"yt-dlp error for {url}: {e}")
+            return False
         except Exception as e:
-            self.logger.error(f"Download failed for {url}: {e}")
+            self.logger.exception(f"Unexpected error downloading {url}: {e}")
             return False
 
     def video_progress_hook(self, d):
@@ -119,24 +142,37 @@ class Bot(discord.ext.commands.Bot):
             self.logger.info(f"{d.get('_percent_str', '?%')} of {d.get('filename', 'unknown')}")
         elif status == 'finished':
             self.logger.info(f"Download finished: {d.get('filename', 'unknown')}")
+        elif status == 'error':
+            self.logger.error(f"Download error for: {d.get('filename', 'unknown')}")
 
     @classmethod
     def _init_logger(cls):
         """
         Initializes the bot logger.
-        Logs to both log file and standard output.
+        Logs to the console (INFO+) and to a daily-rotating file in ./logs/ (DEBUG+).
+        Each run's log file is named bot.log and rotated at midnight, keeping 30 days.
         """
+        os.makedirs(LOGS_DIR, exist_ok=True)
+
         logger = logging.getLogger("bot")
         logger.setLevel(logging.DEBUG)
-        log_format = logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S')
+        log_format = logging.Formatter(
+            '%(asctime)s %(levelname)s [%(name)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+        )
 
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(log_format)
         stream_handler.setLevel(logging.INFO)
         logger.addHandler(stream_handler)
 
-        info_handler = logging.FileHandler('./bot.log')
-        info_handler.setFormatter(log_format)
-        info_handler.setLevel(logging.DEBUG)
-        logger.addHandler(info_handler)
+        # Rotate the log file daily; keep 30 days of history
+        log_file = os.path.join(LOGS_DIR, "bot.log")
+        file_handler = logging.handlers.TimedRotatingFileHandler(
+            log_file, when='midnight', interval=1, backupCount=30, encoding='utf-8',
+        )
+        file_handler.setFormatter(log_format)
+        file_handler.setLevel(logging.DEBUG)
+        logger.addHandler(file_handler)
+
         return logger
