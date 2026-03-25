@@ -100,7 +100,7 @@ class Bot(discord.ext.commands.Bot):
         Runs yt-dlp in a thread pool to avoid blocking the event loop.
         Returns True if successful.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._download_youtube_video_sync, url)
 
     def _download_youtube_video_sync(self, url: str) -> bool:
