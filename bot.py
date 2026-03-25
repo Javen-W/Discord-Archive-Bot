@@ -1,13 +1,16 @@
 import asyncio
+import datetime
+import json
 import logging
 import logging.handlers
+import os
+import re
 import discord
 import validators
-from urllib.parse import urlparse, ParseResult
+import yaml
 import yt_dlp
 import yt_dlp.utils
-import os
-import yaml
+from urllib.parse import urlparse, ParseResult
 
 # bot consts
 HISTORY_LIMIT = 100
@@ -23,6 +26,9 @@ YT_NETLOCS = {
 
 # Logs directory (relative to working directory)
 LOGS_DIR = "./logs"
+
+# Video file extensions recognised during archive scanning
+VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.webm', '.avi', '.mov', '.m4v'}
 
 
 class Bot(discord.ext.commands.Bot):
@@ -70,6 +76,10 @@ class Bot(discord.ext.commands.Bot):
                 continue
             async for msg in channel.history(limit=HISTORY_LIMIT, oldest_first=False):
                 await self.process_message(msg)
+
+        # Backfill metadata for any existing archived videos that are missing it.
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._backfill_metadata_sync)
 
     async def on_message(self, message):
         await self.process_message(message)
@@ -126,15 +136,185 @@ class Bot(discord.ext.commands.Bot):
     def _download_youtube_video_sync(self, url: str) -> bool:
         """Synchronous yt-dlp download, intended to be run in a thread pool executor."""
         try:
+            archive_date = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
             with yt_dlp.YoutubeDL(self.ytdl_config) as ydl:
-                err = ydl.download([url])
-                return not err
+                info = ydl.extract_info(url, download=True)
+                if info is None:
+                    return False
+                # Generate metadata for each downloaded entry (handles playlists too).
+                entries = info.get('entries')
+                if entries is not None:
+                    for entry in entries:
+                        if entry:
+                            self._generate_metadata(ydl, entry, archive_date)
+                else:
+                    self._generate_metadata(ydl, info, archive_date)
+                return True
         except (yt_dlp.utils.DownloadError, yt_dlp.utils.ExtractorError) as e:
             self.logger.error(f"yt-dlp error for {url}: {e}")
             return False
         except Exception as e:
             self.logger.exception(f"Unexpected error downloading {url}: {e}")
             return False
+
+    def _find_video_file(self, ydl: yt_dlp.YoutubeDL, info: dict) -> str | None:
+        """
+        Attempts to locate the actual video file on disk for the given yt-dlp info dict.
+        yt-dlp may change the extension after merging streams, so common extensions are tried
+        if the primary expected path does not exist.
+        Returns the file path if found, otherwise None.
+        """
+        expected_path = ydl.prepare_filename(info)
+        if os.path.exists(expected_path):
+            return expected_path
+        base = os.path.splitext(expected_path)[0]
+        for ext in VIDEO_EXTENSIONS:
+            candidate = base + ext
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def _generate_metadata(
+        self,
+        ydl: yt_dlp.YoutubeDL,
+        info: dict,
+        archive_date: str | None = None,
+        video_path: str | None = None,
+    ) -> bool:
+        """
+        Generates a JSON metadata file alongside the downloaded video file.
+        The file shares the video's base name with a .json extension.
+        Returns True if the metadata was written successfully.
+        """
+        if not info:
+            return False
+
+        try:
+            if video_path is None:
+                video_path = self._find_video_file(ydl, info)
+
+            if video_path:
+                metadata_path = os.path.splitext(video_path)[0] + '.json'
+            else:
+                # Fall back: place metadata in the archive directory named by video ID.
+                archive_dir = self.cfg.get('archive_path', './archive')
+                video_id = info.get('id', 'unknown')
+                metadata_path = os.path.join(archive_dir, f"{video_id}.json")
+                self.logger.warning(
+                    f"Video file not found for '{video_id}'; "
+                    f"metadata will be written to {metadata_path}"
+                )
+
+            # Convert yt-dlp's YYYYMMDD upload_date to ISO 8601.
+            upload_date_raw = info.get('upload_date')
+            upload_date = None
+            if upload_date_raw:
+                try:
+                    upload_date = datetime.datetime.strptime(
+                        upload_date_raw, '%Y%m%d'
+                    ).strftime('%Y-%m-%d')
+                except ValueError:
+                    upload_date = upload_date_raw
+
+            file_size = None
+            if video_path and os.path.exists(video_path):
+                file_size = os.path.getsize(video_path)
+
+            metadata = {
+                'title': info.get('title'),
+                'creator': info.get('uploader') or info.get('channel'),
+                'upload_date': upload_date,
+                'archive_date': archive_date or datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'file_size_bytes': file_size,
+                'description': info.get('description'),
+                'original_url': info.get('webpage_url') or info.get('original_url'),
+                'duration_seconds': info.get('duration'),
+                'video_id': info.get('id'),
+                'thumbnail_url': info.get('thumbnail'),
+                'view_count': info.get('view_count'),
+                'like_count': info.get('like_count'),
+                'tags': info.get('tags') or [],
+                'categories': info.get('categories') or [],
+                'age_limit': info.get('age_limit'),
+            }
+
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+            self.logger.info(f"Metadata saved: {metadata_path}")
+            return True
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to generate metadata for '{info.get('id', 'unknown')}': {e}"
+            )
+            return False
+
+    def _backfill_metadata_sync(self) -> None:
+        """
+        Scans the archive directory for video files that are missing a companion
+        metadata JSON file and attempts to fetch and write the missing metadata from
+        YouTube without re-downloading the video.
+        Intended to run in a thread pool executor so the event loop is not blocked.
+        """
+        archive_path = self.cfg.get('archive_path', './archive')
+        if not os.path.isdir(archive_path):
+            self.logger.debug("Archive directory does not exist; skipping metadata backfill.")
+            return
+
+        missing = []
+        for filename in os.listdir(archive_path):
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in VIDEO_EXTENSIONS:
+                continue
+            video_path = os.path.join(archive_path, filename)
+            metadata_path = os.path.splitext(video_path)[0] + '.json'
+            if not os.path.exists(metadata_path):
+                missing.append((filename, video_path))
+
+        if not missing:
+            self.logger.debug("No videos are missing metadata; skipping backfill.")
+            return
+
+        self.logger.info(f"Backfilling metadata for {len(missing)} video(s).")
+
+        # Build a lightweight config for metadata-only fetching (no download).
+        fetch_config = {
+            k: v for k, v in self.ytdl_config.items()
+            if k not in ('progress_hooks', 'download_archive')
+        }
+        fetch_config['logger'] = self.logger
+
+        for filename, video_path in missing:
+            # yt-dlp's default output template (%(title)s [%(id)s].%(ext)s) embeds the
+            # YouTube video ID (always exactly 11 chars) in square brackets at the end of
+            # the base name.  The pattern below matches that convention to extract the ID.
+            match = re.search(r'\[([A-Za-z0-9_-]{11})\]', filename)
+            if not match:
+                self.logger.warning(
+                    f"Cannot determine video ID from filename '{filename}'; "
+                    "skipping metadata backfill for this file."
+                )
+                continue
+
+            video_id = match.group(1)
+            yt_url = f"https://www.youtube.com/watch?v={video_id}"
+            self.logger.info(f"Fetching metadata for '{filename}' (ID: {video_id})")
+
+            try:
+                with yt_dlp.YoutubeDL(fetch_config) as ydl:
+                    info = ydl.extract_info(yt_url, download=False)
+                    if info:
+                        # Approximate the archive date from the file's modification time.
+                        mtime = os.path.getmtime(video_path)
+                        archive_date = datetime.datetime.fromtimestamp(
+                            mtime, tz=datetime.timezone.utc
+                        ).strftime('%Y-%m-%dT%H:%M:%SZ')
+                        self._generate_metadata(ydl, info, archive_date, video_path)
+                    else:
+                        self.logger.warning(f"No metadata returned for '{filename}'.")
+            except Exception as e:
+                self.logger.error(f"Error backfilling metadata for '{filename}': {e}")
 
     def video_progress_hook(self, d):
         status = d.get('status')
