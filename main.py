@@ -1,10 +1,14 @@
 from bot import Bot
 from dotenv import load_dotenv
-import logging
 import os
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
     load_dotenv()  # take environment variables from .env.
     token = os.getenv('DISCORD_TOKEN')
-    bot = Bot(token=token)
+    if not token:
+        raise RuntimeError(
+            "DISCORD_TOKEN environment variable is not set. "
+            "Please create a .env file with DISCORD_TOKEN=<your-bot-token>."
+        )
+    bot = Bot()
+    bot.run(token=token)

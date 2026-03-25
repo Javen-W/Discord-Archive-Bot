@@ -5,4 +5,12 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ./ ./
+
+# Create directories for archive and logs with appropriate permissions
+RUN mkdir -p /archive /usr/app/logs \
+    && adduser --disabled-password --gecos "" botuser \
+    && chown -R botuser:botuser /usr/app /archive
+
+USER botuser
+
 CMD [ "python3", "./main.py" ]
