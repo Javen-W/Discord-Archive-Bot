@@ -142,13 +142,20 @@ class Bot(discord.ext.commands.Bot):
                 if info is None:
                     return False
                 # Generate metadata for each downloaded entry (handles playlists too).
+                all_metadata_ok = True
                 entries = info.get('entries')
                 if entries is not None:
                     for entry in entries:
                         if entry:
-                            self._generate_metadata(ydl, entry, archive_date)
+                            # Combine results so that any failure is propagated.
+                            if not self._generate_metadata(ydl, entry, archive_date):
+                                all_metadata_ok = False
                 else:
-                    self._generate_metadata(ydl, info, archive_date)
+                    if not self._generate_metadata(ydl, info, archive_date):
+                        all_metadata_ok = False
+                if not all_metadata_ok:
+                    self.logger.error(f"Metadata generation failed for one or more entries from {url}")
+                    return False
                 return True
         except (yt_dlp.utils.DownloadError, yt_dlp.utils.ExtractorError) as e:
             self.logger.error(f"yt-dlp error for {url}: {e}")
