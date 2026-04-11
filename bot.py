@@ -200,17 +200,14 @@ class Bot(discord.ext.commands.Bot):
             if video_path is None:
                 video_path = self._find_video_file(ydl, info)
 
-            if video_path:
-                metadata_path = os.path.splitext(video_path)[0] + '.json'
-            else:
-                # Fall back: place metadata in the archive directory named by video ID.
-                archive_dir = self.cfg.get('archive_path', './archive')
-                video_id = info.get('id', 'unknown')
-                metadata_path = os.path.join(archive_dir, f"{video_id}.json")
-                self.logger.warning(
-                    f"Video file not found for '{video_id}'; "
-                    f"metadata will be written to {metadata_path}"
+            if not video_path:
+                self.logger.error(
+                    f"Video file not found for '{info.get('id', 'unknown')}'; "
+                    "cannot write metadata sidecar."
                 )
+                return False
+
+            metadata_path = os.path.splitext(video_path)[0] + '.json'
 
             # Convert yt-dlp's YYYYMMDD upload_date to ISO 8601.
             upload_date_raw = info.get('upload_date')
@@ -240,8 +237,8 @@ class Bot(discord.ext.commands.Bot):
                 'thumbnail_url': info.get('thumbnail'),
                 'view_count': info.get('view_count'),
                 'like_count': info.get('like_count'),
-                'tags': info.get('tags') or [],
-                'categories': info.get('categories') or [],
+                'tags': info.get('tags'),
+                'categories': info.get('categories'),
                 'age_limit': info.get('age_limit'),
             }
 
